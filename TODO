@@ -1,0 +1,9 @@
+IDEAS
+
+- Write a script for checking if 2 pointers reference the same memory (pointers of different types)
+- Make use of unique pointers
+
+BUGS
+
+- When giving pointer to huge allocation with offset from the beginning more than 1 chunk, the allocation will not be discovered
+- Caches of large allocation bins contain allocations of smaller size, is small2index working correctly? 
