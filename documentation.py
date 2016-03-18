@@ -27,14 +27,10 @@ The offset value is rubbish for huge objects if jemalloc was compiled with obliv
 
 KNOWN BUGS:
 
-If the pointer points to huge object plus some value larger than chunk size, the allocation will not be found!
+1) If the pointer points to huge object plus some value larger than chunk size, the allocation will not be found!
 (What about a really big 'large' allocations).
 
-Thread caches are supported for small allocations.
-
-KNOWN BUGS:
-
-In caches of large allocations are found pointers of different allocated size.
+2) In caches of large allocations are found pointers of different allocated size.
 
 je_scan_sections step
 Scan sections of underlying core dump file in search of jemalloc managed sections. Filter sections based on flags first (e.g. read-write). Then reject sections, not aligned as chunks. Then scan the rest of the sections with given step (by default 16) until the first chunk is found (or not).
@@ -43,6 +39,13 @@ je_dump_chunks beg end file
 beg - beginning address
 end - end addresss
 For the sections found first with je_scan_section dump their content to file on the chunks level.
+
+je_search /size-char max-count string
+Searches previously found heap sections (by je_scan_sections) for some string value.
+size-char is one of b,h,w,g for 8,16,32,64 bit values respectively.
+
+je_init
+Initializes internal jemalloc values that could have been not initialized when loading jexplore due to Linux lazy-loading of jemalloc library.
 
 je_chunk ptr
 Print info on chunk associated with given pointer

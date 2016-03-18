@@ -18,6 +18,9 @@ false = False
 
 heap = jemalloc.heap()
 
+class GetOutOfLoop(Exception):
+  pass
+
 def is_chunk_aligned(ptr):
   try:
     bit = gdb.execute("p (({}&je_chunksize_mask)||0x00000)==0x0".format(ptr), to_string = true).split()[2]
@@ -100,6 +103,51 @@ class je_help(gdb.Command):
   def invoke(self, arg, from_tty):
     print(documentation.text)
 
+class je_threads(gdb.Command):
+  '''Give info on thread caches'''
+
+  def __init__(self):
+    gdb.Command.__init__(self, "je_threads", gdb.COMMAND_OBSCURE)
+
+    global heap
+
+    try:
+      infos = gdb.execute("info threads", to_string = true)
+      for info in infos.splitlines():
+        m = re.match(".*([0-9]+).*(0x[0-9a-fA-F]*) \(LWP ([0-9]*)\).*", info)
+        if m is None:
+          continue
+        idx = m.group(1)
+        threadp = m.group(2)
+        pid = m.group(3)
+        
+        gdb.execute("thread {}".format(idx), to_string = true)
+        tsd = gdb.execute("p je_tsd_tls", to_string = true)
+        m = re.match(".*tcache = (0x[0-9a-fA-F]+).*thread_allocated = ([0-9]+).*thread_deallocated = ([0-9]+).*", tsd)
+        if m is None:
+          print("The core file seems corrupted, TLS data is not available for thread {}".format(pid))
+          return
+
+        heap.threads[idx] = {"thread pointer":threadp, "pid":pid, "tcache":m.group(1), "talloc":m.group(2), "tfree":m.group(3)}
+
+    except RuntimeError:
+      print("Error, while parsing Thread Specific Data")
+      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Thread caches will not be supported!")
+      return
+
+  def invoke(self, arg, from_tty):
+    global heap
+    
+    if not heap.threads:
+      print("Thread Specific Data was not found!")
+      print("Thread caches will not be supported!")
+
+    for t,p in heap.threads.items():
+      print("Thread #{}".format(t))
+      for p,v in p.items():
+        print("\t{}: {}".format(p, v))
+
 class je_init(gdb.Command):
   '''Initialize internal jemalloc values for specific architecture if jemalloc was not build with src/macrolist.c'''
 
@@ -108,6 +156,14 @@ class je_init(gdb.Command):
     self.invoke(arg = [], from_tty = False)
 
   def invoke(self, arg, from_tty):
+
+    try:
+      if self.jemalloc_loaded == true:
+        print("Internal values are already initialized.")
+        return
+    except AttributeError:
+      pass
+
     self.jemalloc_loaded = False
     try:
       shared = gdb.execute("info shared", to_string = true)
@@ -147,8 +203,7 @@ class je_init(gdb.Command):
       gdb.execute("p $macro_NTBINS = macro_NTBINS", to_string = true)
       gdb.execute("p $macro_LG_SIZE_CLASS_GROUP = macro_LG_SIZE_CLASS_GROUP", to_string = true)
       gdb.execute("p $macro_LG_QUANTUM = macro_LG_QUANTUM", to_string = true)
-      print("Jemalloc was built with all necessary macroses")
-      return
+      print("Jemalloc was built with all necessary macroses.")
     else:
       import platform
       mach = platform.machine()
@@ -171,48 +226,6 @@ class je_init(gdb.Command):
         gdb.execute("p $macro_LG_SIZE_CLASS_GROUP = 2", to_string = true)
         gdb.execute("p $macro_LG_QUANTUM = 4", to_string = true)
         print("Jemalloc macroses are hardcoded for x86_64. Type show convenience to view them.")
-        return
-    
-
-class je_threads(gdb.Command):
-  '''Give info on thread caches'''
-
-  def __init__(self):
-    gdb.Command.__init__(self, "je_threads", gdb.COMMAND_OBSCURE)
-
-    global heap
-
-    try:
-      infos = gdb.execute("info threads", to_string = true)
-      for info in infos.splitlines():
-        m = re.match(".*([0-9]+).*(0x[0-9a-fA-F]*) \(LWP ([0-9]*)\).*", info)
-        if m is None:
-          continue
-        idx = m.group(1)
-        threadp = m.group(2)
-        pid = m.group(3)
-        
-        gdb.execute("thread {}".format(idx), to_string = true)
-        tsd = gdb.execute("p je_tsd_tls", to_string = true)
-        m = re.match(".*tcache = (0x[0-9a-fA-F]+).*thread_allocated = ([0-9]+).*thread_deallocated = ([0-9]+).*", tsd)
-        if m is None:
-          print("The core file seems corrupted, TLS data is not available for thread {}".format(pid))
-          return
-
-        heap.threads[idx] = {"thread pointer":threadp, "pid":pid, "tcache":m.group(1), "talloc":m.group(2), "tfree":m.group(3)}
-
-    except RuntimeError:
-      print("Error, while parsing Thread Specific Data")
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
-      print("Thread caches will not be supported!")
-      return
-
-  def invoke(self, arg, from_tty):
-    global heap
-    for t,p in heap.threads.items():
-      print("Thread #{}".format(t))
-      for p,v in p.items():
-        print("\t{}: {}".format(p, v))
 
 class je_scan_sections(gdb.Command):
   '''Evaluate which sections belong to heap'''
@@ -268,6 +281,81 @@ class je_scan_sections(gdb.Command):
     for b,e in heap.sections.items():
       print("{} {}".format(b,e))
 
+class je_search(gdb.Command):
+    '''Search the jemalloc heap for the given hex value'''
+
+    def __init__(self):
+      gdb.Command.__init__(self, 'je_search', gdb.COMMAND_OBSCURE)
+
+    def invoke(self, arg, from_tty):
+
+      if len(arg) < 1:
+        print("Not valid arguments.")
+        return
+      else:
+        arg = arg.split()
+        if len(arg) == 3 and arg[0][0] == "/" and arg[1].isdigit():
+          search_for = arg[2]
+          size = arg[0]
+          count = arg[1]
+        elif len(arg) == 2 and arg[0].isdigit():
+          search_for = arg[1]
+          count = arg[0]
+          size = ""
+        elif len(arg) == 2 and arg[0][0] == "/":
+          search_for = arg[1]
+          size = arg[0]
+          count = float("inf")
+        elif len(arg) == 1:
+          search_for = arg[0]
+          size = ""
+          count = float("inf")
+        else:
+          print("Not valid arguments.")
+          return
+
+      results = []
+      found = false
+      csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
+
+      global heap
+      if not heap.sections:
+        print("Rin je_scan_sections first to find some heap sections.")
+        return
+
+      print("Searching all sections discovered by je_scan_sections for {}".format(search_for))
+
+      try:
+        for beg,end in heap.sections.items():
+          ptr = (int(beg, 16) & ~(csz-1))
+          while (ptr < int(end, 16)):
+            try:
+              out_str = gdb.execute("find {} {}, {}, {}".format(size, hex(ptr), \
+                hex(ptr + csz), search_for), to_string = true)
+            except:
+              continue
+
+            str_results = out_str.split('\n')
+    
+            for str_result in str_results:
+              if str_result.startswith("0x"):
+                found = true
+                results.append((str_result, ptr))
+                if len(results) == count:
+                  raise GetOutOfLoop
+
+            ptr += csz
+
+      except GetOutOfLoop:
+        pass
+
+      if found == false:
+        print("value {} not found".format(search_for))
+        return
+
+      for (what, where) in results:
+        print("found {} at {} (chunk {})".format(search_for, what, hex(where)))
+
 class je_dump_chunks(gdb.Command):
   '''Iterate through the chunks in the given heap mapping'''
 
@@ -284,9 +372,9 @@ class je_dump_chunks(gdb.Command):
       print("Please supply begin and end addresses for the section and the destination file")
       return
 
-    global heap
     csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
 
+    global heap
     if beg not in heap.sections:
       print("Run je_scan_sections to find the correct section first")
       return
@@ -584,11 +672,12 @@ class je_region(gdb.Command):
     return
 
 je_help()
+je_threads()
 je_init()
 je_ptr()
 je_chunk()
 je_run()
 je_region()
-je_threads()
 je_scan_sections()
 je_dump_chunks()
+je_search()
