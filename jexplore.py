@@ -204,7 +204,8 @@ class je_threads(gdb.Command):
     except RuntimeError:
       print("Error, while parsing Thread Specific Data")
       print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
-      sys.exit(0)
+      print("Thread caches will not be supported!")
+      return
 
   def invoke(self, arg, from_tty):
     global heap
