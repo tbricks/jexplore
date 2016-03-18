@@ -3,8 +3,6 @@
 import sys
 import warnings
 
-sys.path.append('.')
-
 true = True
 false = False
 

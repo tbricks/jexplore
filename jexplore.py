@@ -7,8 +7,7 @@ import math
 import re
 import pdb
 
-sys.path.append('.')
-sys.path.append('./jexplore')
+sys.path.append(os.path.dirname(os.path.expanduser(__file__)))
 
 from gdbwrap import *
 import jemalloc
@@ -38,10 +37,10 @@ def validate_chunk(ptr, silent = true):
     gdb.execute("p/x $ptr=%s" % (chunk), to_string = true)
     gdb.execute("p $lg_floor=%d" %(lg_floor), to_string = true)
     chunks_rtree = gdb.execute("p/x je_chunks_rtree", to_string = true).split()[2]
-    start_level = gdb.execute("p $start_level = je_chunks_rtree->start_level[$lg_floor>>macro_LG_RTREE_BITS_PER_LEVEL]", to_string = true).split()[2] # 4
+    start_level = gdb.execute("p $start_level = je_chunks_rtree->start_level[$lg_floor>>$macro_LG_RTREE_BITS_PER_LEVEL]", to_string = true).split()[2] # 4
     height = gdb.execute("p $height = je_chunks_rtree->height", to_string = true).split()[2]
     next_node = gdb.execute("p $next_node = je_chunks_rtree.levels[$start_level].subtree", to_string = true).split()[4]
-    next_subkey = gdb.execute("p $next_subkey = (($ptr>>(((size_t)(1) << (macro_LG_SIZEOF_PTR + 3))-\
+    next_subkey = gdb.execute("p $next_subkey = (($ptr>>(((size_t)(1) << ($macro_LG_SIZEOF_PTR + 3))-\
     je_chunks_rtree.levels[$start_level].cumbits)) & (((size_t)(1) << \
     je_chunks_rtree.levels[$start_level].bits)-1))", to_string = true).split()[2] # 6
 
@@ -59,7 +58,7 @@ def validate_chunk(ptr, silent = true):
         if (next_node == '0x0'):
           freed = true
           break
-        next_subkey = gdb.execute("p $next_subkey = (($ptr>>(((size_t)(1) << (macro_LG_SIZEOF_PTR + 3))-\
+        next_subkey = gdb.execute("p $next_subkey = (($ptr>>(((size_t)(1) << ($macro_LG_SIZEOF_PTR + 3))-\
         je_chunks_rtree.levels[%d].cumbits)) & (((size_t)(1) << \
         je_chunks_rtree.levels[%d].bits)-1))" % (i,i), to_string = true).split()[2]
 
@@ -101,6 +100,80 @@ class je_help(gdb.Command):
   def invoke(self, arg, from_tty):
     print(documentation.text)
 
+class je_init(gdb.Command):
+  '''Initialize internal jemalloc values for specific architecture if jemalloc was not build with src/macrolist.c'''
+
+  def __init__(self):
+    gdb.Command.__init__(self, "je_init", gdb.COMMAND_OBSCURE)
+    self.invoke(arg = [], from_tty = False)
+
+  def invoke(self, arg, from_tty):
+    self.jemalloc_loaded = False
+    try:
+      shared = gdb.execute("info shared", to_string = true)
+    except RuntimeError:
+      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      sys.exit(0)
+
+    for lib in shared.splitlines():
+      if re.search("jemalloc", lib) == None:
+        continue
+      else:
+        self.jemalloc_loaded = True
+        break
+
+    if not self.jemalloc_loaded:
+      print("Jemalloc library not yet loaded, run je_init after loading.")
+      return
+
+    self.macros_built = True
+
+    try:
+      LG_PAGE = int(gdb.execute("p macro_LG_PAGE", to_string = true).split()[2])
+    except RuntimeError:
+      self.macros_built = False
+
+    if self.macros_built:
+      gdb.execute("p $macro_LG_RTREE_BITS_PER_LEVEL = macro_LG_RTREE_BITS_PER_LEVEL", to_string = true)
+      gdb.execute("p $macro_LG_SIZEOF_PTR = macro_LG_SIZEOF_PTR", to_string = true)
+      gdb.execute("p $macro_LG_PAGE = macro_LG_PAGE ", to_string = true)
+      gdb.execute("p $macro_CHUNK_MAP_RUNIND_SHIFT = macro_CHUNK_MAP_RUNIND_SHIFT", to_string = true)
+      gdb.execute("p $macro_CHUNK_MAP_BININD_MASK = macro_CHUNK_MAP_BININD_MASK", to_string = true)
+      gdb.execute("p $macro_CHUNK_MAP_BININD_SHIFT = macro_CHUNK_MAP_BININD_SHIFT", to_string = true)
+      gdb.execute("p $macro_LG_BITMAP_GROUP_NBITS = macro_LG_BITMAP_GROUP_NBITS", to_string = true)
+      gdb.execute("p $macro_BITMAP_GROUP_NBITS_MASK  = macro_BITMAP_GROUP_NBITS_MASK", to_string = true)
+      gdb.execute("p $macro_CHUNK_MAP_SIZE_SHIFT = macro_CHUNK_MAP_SIZE_SHIFT", to_string = true)
+      gdb.execute("p $macro_CHUNK_MAP_SIZE_MASK = macro_CHUNK_MAP_SIZE_MASK", to_string = true)
+      gdb.execute("p $macro_NTBINS = macro_NTBINS", to_string = true)
+      gdb.execute("p $macro_LG_SIZE_CLASS_GROUP = macro_LG_SIZE_CLASS_GROUP", to_string = true)
+      gdb.execute("p $macro_LG_QUANTUM = macro_LG_QUANTUM", to_string = true)
+      print("Jemalloc was built with all necessary macroses")
+      return
+    else:
+      import platform
+      mach = platform.machine()
+
+      if mach != "x86_64":
+        print("Jemalloc was not built with all necessary macroses and architecure {} is not supported".format(mach))
+        sys.exit(0)
+      else:
+        gdb.execute("p $macro_LG_RTREE_BITS_PER_LEVEL = 4", to_string = true)
+        gdb.execute("p $macro_LG_SIZEOF_PTR = 3", to_string = true)
+        gdb.execute("p $macro_LG_PAGE = 12", to_string = true)
+        gdb.execute("p $macro_CHUNK_MAP_RUNIND_SHIFT = 13", to_string = true)
+        gdb.execute("p $macro_CHUNK_MAP_BININD_MASK = 0x1fe0", to_string = true)
+        gdb.execute("p $macro_CHUNK_MAP_BININD_SHIFT = 5", to_string = true)
+        gdb.execute("p $macro_LG_BITMAP_GROUP_NBITS = 6", to_string = true)
+        gdb.execute("p $macro_BITMAP_GROUP_NBITS_MASK  = 63", to_string = true)
+        gdb.execute("p $macro_CHUNK_MAP_SIZE_SHIFT = 1", to_string = true)
+        gdb.execute("p $macro_CHUNK_MAP_SIZE_MASK = 0xffffffffffffe000", to_string = true)
+        gdb.execute("p $macro_NTBINS = 1", to_string = true)
+        gdb.execute("p $macro_LG_SIZE_CLASS_GROUP = 2", to_string = true)
+        gdb.execute("p $macro_LG_QUANTUM = 4", to_string = true)
+        print("Jemalloc macroses are hardcoded for x86_64. Type show convenience to view them.")
+        return
+    
+
 class je_threads(gdb.Command):
   '''Give info on thread caches'''
 
@@ -129,6 +202,7 @@ class je_threads(gdb.Command):
         heap.threads[idx] = {"thread pointer":threadp, "pid":pid, "tcache":m.group(1), "talloc":m.group(2), "tfree":m.group(3)}
 
     except RuntimeError:
+      print("Error, while parsing Thread Specific Data")
       print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
 
@@ -145,18 +219,13 @@ class je_scan_sections(gdb.Command):
   def __init__(self):
     gdb.Command.__init__(self, "je_scan_sections", gdb.COMMAND_OBSCURE)
 
-    global heap
-    try:
-      heap.chunksize = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
-    except RuntimeError:
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
-      sys.exit(0)
 
   def invoke(self, arg, from_tty):
     if len(arg) < 1:
       step = 16
-    arg = arg.split()
-    step = int(arg[0])
+    else:
+      arg = arg.split()
+      step = int(arg[0])
     
     #check all mappings with RW 
     try:
@@ -166,6 +235,7 @@ class je_scan_sections(gdb.Command):
       sys.exit(0)
 
     global heap
+    csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
       
     for section in sections.splitlines():
       if re.search("ALLOC LOAD HAS_CONTENTS$", section) != None:
@@ -174,7 +244,7 @@ class je_scan_sections(gdb.Command):
         if beg in heap.sections:
           continue
 
-        ptr = (int(beg, 16) & ~(heap.chunksize-1))
+        ptr = (int(beg, 16) & ~(csz-1))
         if (ptr != int(beg, 16)):
           continue
 
@@ -187,7 +257,7 @@ class je_scan_sections(gdb.Command):
               heap.sections[beg] = end
               break
             else:
-              ptr += heap.chunksize*step
+              ptr += csz*step
 
     if not heap.sections:
       print("No chunks detected in \"maint info sections\" with step {}".format(step))
@@ -214,15 +284,14 @@ class je_dump_chunks(gdb.Command):
       return
 
     global heap
+    csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
 
     if beg not in heap.sections:
       print("Run je_scan_sections to find the correct section first")
       return
 
-    ptr = (int(beg, 16) & ~(heap.chunksize-1))
+    ptr = (int(beg, 16) & ~(csz-1))
     f = open(fil, "w+")
-
-    csz = heap.chunksize
 
     while (ptr < int(end, 16)):
       chunk, arena, extent_node = validate_chunk(hex(ptr), silent=True)
@@ -242,7 +311,7 @@ class je_dump_chunks(gdb.Command):
           print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
           sys.exit(0)
 
-      ptr += heap.chunksize
+      ptr += csz
 
     f.close()
 
@@ -260,7 +329,7 @@ class je_ptr(gdb.Command):
     ptr = arg[0]
     
     global heap
-    csz = heap.chunksize
+    csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
 
     chunk, arena, extent_node = validate_chunk(ptr, silent=true)
 
@@ -277,11 +346,11 @@ class je_ptr(gdb.Command):
     try:
       gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
       chunk = gdb.execute("p/x $chunk=((uintptr_t)$ptr&~je_chunksize_mask)", to_string = true).split()[2] # 0x1fffff
-      pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> macro_LG_PAGE", to_string = true).split()[2] # 12
+      pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> $macro_LG_PAGE", to_string = true).split()[2] # 12
       mapbits = int(gdb.execute("p/x $mapbits=((arena_chunk_t*)$chunk)->map_bits[$pageind-je_map_bias].bits", \
       to_string = true).split()[2], 16) # 13
-      rpageind = gdb.execute("p $rpageind = $pageind - ($mapbits >> macro_CHUNK_MAP_RUNIND_SHIFT)", to_string = true).split()[2] # 13
-      rpages = gdb.execute("p/x $rpages=((uintptr_t)$chunk + ($rpageind << macro_LG_PAGE))", to_string = true).split()[2] # 12
+      rpageind = gdb.execute("p $rpageind = $pageind - ($mapbits >> $macro_CHUNK_MAP_RUNIND_SHIFT)", to_string = true).split()[2] # 13
+      rpages = gdb.execute("p/x $rpages=((uintptr_t)$chunk + ($rpageind << $macro_LG_PAGE))", to_string = true).split()[2] # 12
     except RuntimeError:
       print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
@@ -293,8 +362,8 @@ class je_ptr(gdb.Command):
 
     if (r.is_large()):
       try:
-        chunk_map_ss = int(gdb.execute("p macro_CHUNK_MAP_SIZE_SHIFT", to_string = true).split()[2]) # 1
-        chunk_map_sm = int(gdb.execute("p macro_CHUNK_MAP_SIZE_MASK", to_string = true).split()[2]) # 0xffffffffffffe000
+        chunk_map_ss = int(gdb.execute("p $macro_CHUNK_MAP_SIZE_SHIFT", to_string = true).split()[2]) # 1
+        chunk_map_sm = int(gdb.execute("p $macro_CHUNK_MAP_SIZE_MASK", to_string = true).split()[2]) # 0xffffffffffffe000
         tcache_maxsz = int(gdb.execute("p 1<<je_opt_lg_tcache_max", to_string = true).split()[2])
         large_pad    = int(gdb.execute("p large_pad", to_string = true).split()[2])
       except RuntimeError:
@@ -313,9 +382,9 @@ class je_ptr(gdb.Command):
         return
 
       try:
-        sg = int(gdb.execute("p macro_LG_SIZE_CLASS_GROUP", to_string = True).split()[2]) # 2
-        qu = int(gdb.execute("p macro_LG_QUANTUM", to_string = True).split()[2]) # 4
-        nt = int(gdb.execute("p macro_NTBINS", to_string = True).split()[2]) # 1
+        sg = int(gdb.execute("p $macro_LG_SIZE_CLASS_GROUP", to_string = True).split()[2]) # 2
+        qu = int(gdb.execute("p $macro_LG_QUANTUM", to_string = True).split()[2]) # 4
+        nt = int(gdb.execute("p $macro_NTBINS", to_string = True).split()[2]) # 1
       except RuntimeError:
         print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
         sys.exit(0)
@@ -350,15 +419,15 @@ class je_ptr(gdb.Command):
       to_string = true).split()[2] # 4096 13
       run = gdb.execute("p/x $run=&((arena_chunk_map_misc_t*)$miscelm)->run", to_string = true).split()[2]
       bitmap = gdb.execute("p/x $bitmap=((arena_run_t*)$run)->bitmap", to_string = true).split()[2]
-      binind = gdb.execute("p $binind=($mapbits&macro_CHUNK_MAP_BININD_MASK)>>macro_CHUNK_MAP_BININD_SHIFT", to_string = true).split()[2] # 0x1fe0 5
+      binind = gdb.execute("p $binind=($mapbits&$macro_CHUNK_MAP_BININD_MASK)>>$macro_CHUNK_MAP_BININD_SHIFT", to_string = true).split()[2] # 0x1fe0 5
       bin_info = gdb.execute("p $bin_info = &je_arena_bin_info[$binind]", to_string = true).split()[4]
       diff = gdb.execute("p $diff=(unsigned)((uintptr_t)$ptr-(uintptr_t)$rpages-((arena_bin_info_t*)$bin_info)->reg0_offset)", \
       to_string = true).split()[2]       
       interval = gdb.execute("p $interval = ((arena_bin_info_t*)$bin_info)->reg_interval", to_string = true).split()[2]
       regind = gdb.execute("p $regind = $diff/$interval", to_string = true).split()[2]
-      goff = gdb.execute("p $goff=$regind>>macro_LG_BITMAP_GROUP_NBITS", to_string = true).split()[2] # 6
+      goff = gdb.execute("p $goff=$regind>>$macro_LG_BITMAP_GROUP_NBITS", to_string = true).split()[2] # 6
       g = gdb.execute("p/x $g=((bitmap_t*)$bitmap)[$goff]", to_string = true).split()[2]
-      bit = gdb.execute("p $bit=(!($g&(1LU<<($regind&macro_BITMAP_GROUP_NBITS_MASK))))", to_string = true).split()[2] # 63
+      bit = gdb.execute("p $bit=(!($g&(1LU<<($regind&$macro_BITMAP_GROUP_NBITS_MASK))))", to_string = true).split()[2] # 63
     except RuntimeError:
       print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
@@ -401,7 +470,7 @@ class je_chunk(gdb.Command):
     chunk, arena, extent_node = validate_chunk(ptr, silent = true)
 
     global heap
-    csz = heap.chunksize
+    csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
 
     if extent_node != "0x0":
       if arena != "0x0":
@@ -429,16 +498,16 @@ class je_run(gdb.Command):
     try:
       gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
       chunk = gdb.execute("p/x $chunk=((uintptr_t)$ptr&~je_chunksize_mask)", to_string = true).split()[2] # 0x1fffff
-      pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> macro_LG_PAGE", to_string = true).split()[2] # 12
+      pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> $macro_LG_PAGE", to_string = true).split()[2] # 12
       mapbits = int(gdb.execute("p/x $mapbits=((arena_chunk_t*)$chunk)->map_bits[$pageind-je_map_bias].bits", \
       to_string = true).split()[2], 16) # 13
-      rpageind = gdb.execute("p $rpageind = $pageind - ($mapbits >> macro_CHUNK_MAP_RUNIND_SHIFT)", to_string = true).split()[2] # 13
-      rpages = gdb.execute("p/x $rpages=((uintptr_t)$chunk + ($rpageind << macro_LG_PAGE))", to_string = true).split()[2] # 12
+      rpageind = gdb.execute("p $rpageind = $pageind - ($mapbits >> $macro_CHUNK_MAP_RUNIND_SHIFT)", to_string = true).split()[2] # 13
+      rpages = gdb.execute("p/x $rpages=((uintptr_t)$chunk + ($rpageind << $macro_LG_PAGE))", to_string = true).split()[2] # 12
       miscelm = gdb.execute("p/x $miscelm=((arena_chunk_map_misc_t *)((uintptr_t)$chunk+(uintptr_t)je_map_misc_offset)+$rpageind-je_map_bias)", \
       to_string = true).split()[2] # 4096 13
       run = gdb.execute("p/x $run=&((arena_chunk_map_misc_t*)$miscelm)->run", to_string = true).split()[2]
-      chunk_map_ss = int(gdb.execute("p macro_CHUNK_MAP_SIZE_SHIFT", to_string = true).split()[2]) # 1
-      chunk_map_sm = int(gdb.execute("p macro_CHUNK_MAP_SIZE_MASK", to_string = true).split()[2])  # 0xffffffffffffe000
+      chunk_map_ss = int(gdb.execute("p $macro_CHUNK_MAP_SIZE_SHIFT", to_string = true).split()[2]) # 1
+      chunk_map_sm = int(gdb.execute("p $macro_CHUNK_MAP_SIZE_MASK", to_string = true).split()[2])  # 0xffffffffffffe000
       tcache_maxsz = int(gdb.execute("p 1<<je_opt_lg_tcache_max", to_string = true).split()[2])
       large_pad    = int(gdb.execute("p large_pad", to_string = true).split()[2])
     except RuntimeError:
@@ -474,7 +543,7 @@ class je_region(gdb.Command):
     try:
       gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
       chunk = gdb.execute("p/x $chunk=((uintptr_t)$ptr&~je_chunksize_mask)", to_string = true).split()[2]
-      pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> macro_LG_PAGE", to_string = true).split()[2]
+      pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> $macro_LG_PAGE", to_string = true).split()[2]
       mapbits = int(gdb.execute("p/x $mapbits=((arena_chunk_t*)$chunk)->map_bits[$pageind-je_map_bias].bits", \
       to_string = true).split()[2], 16)
     except RuntimeError:
@@ -488,22 +557,22 @@ class je_region(gdb.Command):
         return
 
     try:
-      rpageind = gdb.execute("p $rpageind = $pageind - ($mapbits >> macro_CHUNK_MAP_RUNIND_SHIFT)", to_string = true).split()[2]
-      rpages = gdb.execute("p/x $rpages=((uintptr_t)$chunk + ($rpageind << macro_LG_PAGE))", to_string = true).split()[2]
+      rpageind = gdb.execute("p $rpageind = $pageind - ($mapbits >> $macro_CHUNK_MAP_RUNIND_SHIFT)", to_string = true).split()[2]
+      rpages = gdb.execute("p/x $rpages=((uintptr_t)$chunk + ($rpageind << $macro_LG_PAGE))", to_string = true).split()[2]
       miscelm = gdb.execute("p/x $miscelm=((arena_chunk_map_misc_t *)((uintptr_t)$chunk+(uintptr_t)je_map_misc_offset)+$rpageind-je_map_bias)", \
       to_string = true).split()[2]
       run = gdb.execute("p/x $run=&((arena_chunk_map_misc_t*)$miscelm)->run", to_string = true).split()[2]
       bitmap = gdb.execute("p/x $bitmap=((arena_run_t*)$run)->bitmap", to_string = true).split()[2]
-      binind = gdb.execute("p $binind=($mapbits&macro_CHUNK_MAP_BININD_MASK)>>macro_CHUNK_MAP_BININD_SHIFT", to_string = true).split()[2]
+      binind = gdb.execute("p $binind=($mapbits&$macro_CHUNK_MAP_BININD_MASK)>>$macro_CHUNK_MAP_BININD_SHIFT", to_string = true).split()[2]
       bin_info = gdb.execute("p $bin_info = &je_arena_bin_info[$binind]", to_string = true).split()[4]
       diff = gdb.execute("p $diff=(unsigned)((uintptr_t)$ptr-(uintptr_t)$rpages-((arena_bin_info_t*)$bin_info)->reg0_offset)", \
       to_string = true).split()[2]       
       interval = gdb.execute("p $interval = ((arena_bin_info_t*)$bin_info)->reg_interval", to_string = true).split()[2]
       size = gdb.execute("p $interval = ((arena_bin_info_t*)$bin_info)->reg_size", to_string = true).split()[2]
       regind = gdb.execute("p $regind = $diff/$interval", to_string = true).split()[2]
-      goff = gdb.execute("p $goff=$regind>>macro_LG_BITMAP_GROUP_NBITS", to_string = true).split()[2]
+      goff = gdb.execute("p $goff=$regind>>$macro_LG_BITMAP_GROUP_NBITS", to_string = true).split()[2]
       g = gdb.execute("p/x $g=((bitmap_t*)$bitmap)[$goff]", to_string = true).split()[2]
-      bit = gdb.execute("p $bit=(!($g&(1LU<<($regind&macro_BITMAP_GROUP_NBITS_MASK))))", to_string = true).split()[2]
+      bit = gdb.execute("p $bit=(!($g&(1LU<<($regind&$macro_BITMAP_GROUP_NBITS_MASK))))", to_string = true).split()[2]
     except RuntimeError:
       print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
@@ -514,6 +583,7 @@ class je_region(gdb.Command):
     return
 
 je_help()
+je_init()
 je_ptr()
 je_chunk()
 je_run()
