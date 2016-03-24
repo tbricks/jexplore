@@ -20,9 +20,14 @@ jexplore - is a bundle of python scripts which help to unveil the state of under
 Read the complete documention in documentation.py file.
 
 Basic commands are: 
-- je_ptr ptr
-- je_chunk ptr
-- je_run ptr
-- je_region ptr
-- je_threads
-- je_scan_sections step
+- je_help - print help from documentation.py
+- je_init - define jemalloc macroses if they were not resolved when starting gdb session
+- je_threads - print thread specific data
+- je_ptr ptr - check internal jemalloc structures associated with this pointer 
+- je_chunk ptr - check the chunk associated with this pointer (huge)
+- je_run ptr - check the run associated with this pointer (large)
+- je_region ptr - check the region associated with this pointer (small)
+- je_scan_sections step - detect heap sections in mmap of the process
+- je_dump_chunks beg end file - dump chunks to the file from the section identified by beg and end addr.
+- je_search /size-char max-count string - search string in detected heap sections (flags like gdb find)
+  

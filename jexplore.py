@@ -95,7 +95,7 @@ def validate_chunk(ptr, silent = true):
 ####### exported gdb commands ######
 
 class je_help(gdb.Command):
-  '''Details about the commands provided by je_analyzer'''
+  '''print help from documentation.py'''
 
   def __init__(self):
     gdb.Command.__init__(self, "je_help", gdb.COMMAND_OBSCURE)
@@ -104,7 +104,7 @@ class je_help(gdb.Command):
     print(documentation.text)
 
 class je_threads(gdb.Command):
-  '''Give info on thread caches'''
+  '''print thread specific data'''
 
   def __init__(self):
     gdb.Command.__init__(self, "je_threads", gdb.COMMAND_OBSCURE)
@@ -149,7 +149,7 @@ class je_threads(gdb.Command):
         print("\t{}: {}".format(p, v))
 
 class je_init(gdb.Command):
-  '''Initialize internal jemalloc values for specific architecture if jemalloc was not build with src/macrolist.c'''
+  '''define jemalloc macroses if they were not resolved when starting gdb session'''
 
   def __init__(self):
     gdb.Command.__init__(self, "je_init", gdb.COMMAND_OBSCURE)
@@ -228,7 +228,7 @@ class je_init(gdb.Command):
         print("Jemalloc macroses are hardcoded for x86_64. Type show convenience to view them.")
 
 class je_scan_sections(gdb.Command):
-  '''Evaluate which sections belong to heap'''
+  '''detect heap sections in mmap of the process'''
 
   def __init__(self):
     gdb.Command.__init__(self, "je_scan_sections", gdb.COMMAND_OBSCURE)
@@ -282,82 +282,82 @@ class je_scan_sections(gdb.Command):
       print("{} {}".format(b,e))
 
 class je_search(gdb.Command):
-    '''Search the jemalloc heap for the given hex value'''
+  '''search string in detected heap sections (flags like gdb find)'''
 
-    def __init__(self):
-      gdb.Command.__init__(self, 'je_search', gdb.COMMAND_OBSCURE)
+  def __init__(self):
+    gdb.Command.__init__(self, 'je_search', gdb.COMMAND_OBSCURE)
 
-    def invoke(self, arg, from_tty):
+  def invoke(self, arg, from_tty):
 
-      if len(arg) < 1:
+    if len(arg) < 1:
+      print("Not valid arguments.")
+      return
+    else:
+      arg = arg.split()
+      if len(arg) == 3 and arg[0][0] == "/" and arg[1].isdigit():
+        search_for = arg[2]
+        size = arg[0]
+        count = arg[1]
+      elif len(arg) == 2 and arg[0].isdigit():
+        search_for = arg[1]
+        count = arg[0]
+        size = ""
+      elif len(arg) == 2 and arg[0][0] == "/":
+        search_for = arg[1]
+        size = arg[0]
+        count = float("inf")
+      elif len(arg) == 1:
+        search_for = arg[0]
+        size = ""
+        count = float("inf")
+      else:
         print("Not valid arguments.")
         return
-      else:
-        arg = arg.split()
-        if len(arg) == 3 and arg[0][0] == "/" and arg[1].isdigit():
-          search_for = arg[2]
-          size = arg[0]
-          count = arg[1]
-        elif len(arg) == 2 and arg[0].isdigit():
-          search_for = arg[1]
-          count = arg[0]
-          size = ""
-        elif len(arg) == 2 and arg[0][0] == "/":
-          search_for = arg[1]
-          size = arg[0]
-          count = float("inf")
-        elif len(arg) == 1:
-          search_for = arg[0]
-          size = ""
-          count = float("inf")
-        else:
-          print("Not valid arguments.")
-          return
 
-      results = []
-      found = false
-      csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
+    results = []
+    found = false
+    csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
 
-      global heap
-      if not heap.sections:
-        print("Rin je_scan_sections first to find some heap sections.")
-        return
+    global heap
+    if not heap.sections:
+      print("Rin je_scan_sections first to find some heap sections.")
+      return
 
-      print("Searching all sections discovered by je_scan_sections for {}".format(search_for))
+    print("Searching all sections discovered by je_scan_sections for {}".format(search_for))
 
-      try:
-        for beg,end in heap.sections.items():
-          ptr = (int(beg, 16) & ~(csz-1))
-          while (ptr < int(end, 16)):
-            try:
-              out_str = gdb.execute("find {} {}, {}, {}".format(size, hex(ptr), \
-                hex(ptr + csz), search_for), to_string = true)
-            except:
-              continue
+    try:
+      for beg,end in heap.sections.items():
+        ptr = (int(beg, 16) & ~(csz-1))
+        while (ptr < int(end, 16)):
+          try:
+            out_str = gdb.execute("find {} {}, {}, {}".format(size, hex(ptr), \
+              hex(ptr + csz), search_for), to_string = true)
+          except:
+            continue
 
-            str_results = out_str.split('\n')
-    
-            for str_result in str_results:
-              if str_result.startswith("0x"):
-                found = true
-                results.append((str_result, ptr))
-                if len(results) == count:
-                  raise GetOutOfLoop
+          str_results = out_str.split('\n')
+  
+          for str_result in str_results:
+            if str_result.startswith("0x"):
+              found = true
+              results.append((str_result, ptr))
+              if len(results) == count:
+                raise GetOutOfLoop
 
-            ptr += csz
+          ptr += csz
 
-      except GetOutOfLoop:
-        pass
+    except GetOutOfLoop:
+      pass
 
-      if found == false:
-        print("value {} not found".format(search_for))
-        return
+    if found == false:
+      print("value {} not found".format(search_for))
+      return
 
-      for (what, where) in results:
-        print("found {} at {} (chunk {})".format(search_for, what, hex(where)))
+    for (what, where) in results:
+      print("found {} at {} (chunk {})".format(search_for, what, hex(where)))
 
 class je_dump_chunks(gdb.Command):
-  '''Iterate through the chunks in the given heap mapping'''
+  '''dump chunks to the file from the section identified by beg and end addr.'''
 
   def __init__(self):
     gdb.Command.__init__(self, "je_dump_chunks", gdb.COMMAND_OBSCURE)
@@ -405,6 +405,7 @@ class je_dump_chunks(gdb.Command):
     f.close()
 
 class je_ptr(gdb.Command):
+  '''check internal jemalloc structures associated with this pointer''' 
 
   def __init__(self):
     gdb.Command.__init__(self, "je_ptr", gdb.COMMAND_OBSCURE)
@@ -544,6 +545,7 @@ class je_ptr(gdb.Command):
     
 
 class je_chunk(gdb.Command):
+  '''check the chunk associated with this pointer (huge)'''
 
   def __init__(self):
     gdb.Command.__init__(self, "je_chunk", gdb.COMMAND_OBSCURE)
@@ -572,6 +574,7 @@ class je_chunk(gdb.Command):
     return
 
 class je_run(gdb.Command):
+  '''check the run associated with this pointer (large)'''
 
   def __init__(self):
     gdb.Command.__init__(self, "je_run", gdb.COMMAND_OBSCURE)
@@ -618,6 +621,7 @@ class je_run(gdb.Command):
     return
 
 class je_region(gdb.Command):
+  '''check the region associated with this pointer (small)'''
 
   def __init__(self):
     gdb.Command.__init__(self, "je_region", gdb.COMMAND_OBSCURE)
