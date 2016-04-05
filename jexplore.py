@@ -32,11 +32,11 @@ def is_chunk_aligned(ptr):
 
 def validate_chunk(ptr, silent = true):
 
-  chunk = gdb.execute("p/x (((uintptr_t){})&~je_chunksize_mask)".format(ptr), to_string = true).split()[2]
-  lg = math.log(int(ptr,16),2)
-  lg_floor = math.floor(lg)
-
   try:
+    ptr = gdb.execute("p/x (uintptr_t){}".format(ptr), to_string = true).split()[2]
+    chunk = gdb.execute("p/x (((uintptr_t){})&~je_chunksize_mask)".format(ptr), to_string = true).split()[2]
+    lg = math.log(int(ptr,16),2)
+    lg_floor = math.floor(lg)
     gdb.execute("p/x $ptr=%s" % (chunk), to_string = true)
     gdb.execute("p $lg_floor=%d" %(lg_floor), to_string = true)
     chunks_rtree = gdb.execute("p/x je_chunks_rtree", to_string = true).split()[2]
@@ -417,6 +417,11 @@ class je_ptr(gdb.Command):
 
     arg = arg.split()
     ptr = arg[0]
+    try:
+      ptr = gdb.execute("p/x (uintptr_t){}".format(ptr), to_string = true).split()[2]
+    except RuntimeError:
+      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      sys.exit(0)
     
     global heap
     csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
@@ -588,6 +593,7 @@ class je_run(gdb.Command):
     ptr = arg[0]
 
     try:
+      ptr = gdb.execute("p/x (uintptr_t){}".format(ptr), to_string = true).split()[2]
       gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
       chunk = gdb.execute("p/x $chunk=((uintptr_t)$ptr&~je_chunksize_mask)", to_string = true).split()[2] # 0x1fffff
       pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> $macro_LG_PAGE", to_string = true).split()[2] # 12
@@ -634,6 +640,7 @@ class je_region(gdb.Command):
     ptr = arg[0]
 
     try:
+      ptr = gdb.execute("p/x (uintptr_t){}".format(ptr), to_string = true).split()[2]
       gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
       chunk = gdb.execute("p/x $chunk=((uintptr_t)$ptr&~je_chunksize_mask)", to_string = true).split()[2]
       pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> $macro_LG_PAGE", to_string = true).split()[2]
