@@ -23,9 +23,9 @@ class GetOutOfLoop(Exception):
 
 def is_chunk_aligned(ptr):
   try:
-    bit = gdb.execute("p (({}&je_chunksize_mask)||0x00000)==0x0".format(ptr), to_string = true).split()[2]
+    bit = gdb.execute("p (({0}&je_chunksize_mask)||0x00000)==0x0".format(ptr), to_string = true).split()[2]
   except RuntimeError:
-    print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+    print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
     sys.exit(0)
 
   return bool(bit)
@@ -33,8 +33,8 @@ def is_chunk_aligned(ptr):
 def validate_chunk(ptr, silent = true):
 
   try:
-    ptr = gdb.execute("p/x (uintptr_t){}".format(ptr), to_string = true).split()[2]
-    chunk = gdb.execute("p/x (((uintptr_t){})&~je_chunksize_mask)".format(ptr), to_string = true).split()[2]
+    ptr = gdb.execute("p/x (uintptr_t){0}".format(ptr), to_string = true).split()[2]
+    chunk = gdb.execute("p/x (((uintptr_t){0})&~je_chunksize_mask)".format(ptr), to_string = true).split()[2]
     lg = math.log(int(ptr,16),2)
     lg_floor = math.floor(lg)
     gdb.execute("p/x $ptr=%s" % (chunk), to_string = true)
@@ -48,8 +48,8 @@ def validate_chunk(ptr, silent = true):
     je_chunks_rtree.levels[$start_level].bits)-1))", to_string = true).split()[2] # 6
 
     if not silent:
-      print("je_chunks_rtree start_level {} {}".format(chunks_rtree, start_level))
-      print("next_node next_subkey {} {}".format(next_node, next_subkey))
+      print("je_chunks_rtree start_level {0} {1}".format(chunks_rtree, start_level))
+      print("next_node next_subkey {0} {1}".format(next_node, next_subkey))
 
     if (next_node == "0x0"):
       freed = true
@@ -66,7 +66,7 @@ def validate_chunk(ptr, silent = true):
         je_chunks_rtree.levels[%d].bits)-1))" % (i,i), to_string = true).split()[2]
 
         if not silent:
-          print("next_node next_subkey {} {}".format(next_node, next_subkey))
+          print("next_node next_subkey {0} {1}".format(next_node, next_subkey))
 
     if (freed == false):
       extent_node = gdb.execute("p $extent_node=$next_node[$next_subkey]->val", to_string = true).split()[4]
@@ -74,7 +74,7 @@ def validate_chunk(ptr, silent = true):
       extent_node = "0x0" 
 
   except RuntimeError:
-    print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+    print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
     sys.exit(0)
 
   if (extent_node == "0x0"):
@@ -84,7 +84,7 @@ def validate_chunk(ptr, silent = true):
       achun = gdb.execute("p $extent_node->en_achunk", to_string = true).split()[2]
       arena = gdb.execute("p $extent_node->en_arena", to_string = true).split()[4]
     except RuntimeError:
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
 
   if achun == "true":
@@ -121,18 +121,18 @@ class je_threads(gdb.Command):
         threadp = m.group(2)
         pid = m.group(3)
         
-        gdb.execute("thread {}".format(idx), to_string = true)
+        gdb.execute("thread {0}".format(idx), to_string = true)
         tsd = gdb.execute("p je_tsd_tls", to_string = true)
         m = re.match(".*tcache = (0x[0-9a-fA-F]+).*thread_allocated = ([0-9]+).*thread_deallocated = ([0-9]+).*", tsd)
         if m is None:
-          print("The core file seems corrupted, TLS data is not available for thread {}".format(pid))
+          print("The core file seems corrupted, TLS data is not available for thread {0}".format(pid))
           return
 
         heap.threads[idx] = {"thread pointer":threadp, "pid":pid, "tcache":m.group(1), "talloc":m.group(2), "tfree":m.group(3)}
 
     except RuntimeError:
       print("Error, while parsing Thread Specific Data")
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
       print("Thread caches will not be supported!")
       return
 
@@ -143,10 +143,24 @@ class je_threads(gdb.Command):
       print("Thread Specific Data was not found!")
       print("Thread caches will not be supported!")
 
-    for t,p in heap.threads.items():
-      print("Thread #{}".format(t))
-      for p,v in p.items():
-        print("\t{}: {}".format(p, v))
+    for t,p in heap.threads.iteritems():
+      tsd = gdb.execute("p je_tsd_tls", to_string = true)
+      m = re.match(".*tcache = (0x[0-9a-fA-F]+).*thread_allocated = ([0-9]+).*thread_deallocated = ([0-9]+).*", tsd)
+      if m is None:
+        print("The core file seems corrupted, TLS data is not available for thread {0}".format(pid))
+        return
+
+      heap.threads[t]["tcache"] = m.group(1)
+      heap.threads[t]["talloc"] = m.group(2)
+      heap.threads[t]["tfree"] = m.group(3)
+
+    if not from_tty:
+      return
+
+    for t,p in heap.threads.iteritems():
+      print("Thread #{0}".format(t))
+      for p,v in p.iteritems():
+        print("\t{0}: {1}".format(p, v))
 
 class je_init(gdb.Command):
   '''define jemalloc macroses if they were not resolved when starting gdb session'''
@@ -168,7 +182,7 @@ class je_init(gdb.Command):
     try:
       shared = gdb.execute("info shared", to_string = true)
     except RuntimeError:
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
 
     for lib in shared.splitlines():
@@ -209,7 +223,7 @@ class je_init(gdb.Command):
       mach = platform.machine()
 
       if mach != "x86_64":
-        print("Jemalloc was not built with all necessary macroses and architecure {} is not supported".format(mach))
+        print("Jemalloc was not built with all necessary macroses and architecure {0} is not supported".format(mach))
         sys.exit(0)
       else:
         gdb.execute("p $macro_LG_RTREE_BITS_PER_LEVEL = 4", to_string = true)
@@ -245,7 +259,7 @@ class je_scan_sections(gdb.Command):
     try:
       sections = gdb.execute("maint info sections", to_string = true)
     except RuntimeError:
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
 
     global heap
@@ -253,7 +267,8 @@ class je_scan_sections(gdb.Command):
       
     for section in sections.splitlines():
       if re.search("ALLOC LOAD HAS_CONTENTS$", section) != None:
-        beg, end, *misc = re.findall("0x[0-9a-fA-F]*", section)
+        addresses = re.findall("0x[0-9a-fA-F]*", section)
+        beg, end = addresses[0], addresses[1]
 
         if beg in heap.sections:
           continue
@@ -262,7 +277,7 @@ class je_scan_sections(gdb.Command):
         if (ptr != int(beg, 16)):
           continue
 
-        print("Potential heap section: {} {}".format(beg, end))
+        print("Potential heap section: {0} {1}".format(beg, end))
 
         while (ptr < int(end, 16)):
             chunk, arena, extent_node = validate_chunk(hex(ptr), silent = true)
@@ -274,12 +289,12 @@ class je_scan_sections(gdb.Command):
               ptr += csz*step
 
     if not heap.sections:
-      print("No chunks detected in \"maint info sections\" with step {}".format(step))
+      print("No chunks detected in \"maint info sections\" with step {0}".format(step))
     else:
       print("Chunks detected in following sections:")
 
-    for b,e in heap.sections.items():
-      print("{} {}".format(b,e))
+    for b,e in heap.sections.iteritems():
+      print("{0} {1}".format(b,e))
 
 class je_search(gdb.Command):
   '''search string in detected heap sections (flags like gdb find)'''
@@ -323,14 +338,14 @@ class je_search(gdb.Command):
       print("Rin je_scan_sections first to find some heap sections.")
       return
 
-    print("Searching all sections discovered by je_scan_sections for {}".format(search_for))
+    print("Searching all sections discovered by je_scan_sections for {0}".format(search_for))
 
     try:
-      for beg,end in heap.sections.items():
+      for beg,end in heap.sections.iteritems():
         ptr = (int(beg, 16) & ~(csz-1))
         while (ptr < int(end, 16)):
           try:
-            out_str = gdb.execute("find {} {}, {}, {}".format(size, hex(ptr), \
+            out_str = gdb.execute("find {0} {1}, {2}, {3}".format(size, hex(ptr), \
               hex(ptr + csz), search_for), to_string = true)
           except:
             continue
@@ -350,11 +365,11 @@ class je_search(gdb.Command):
       pass
 
     if found == false:
-      print("value {} not found".format(search_for))
+      print("value {0} not found".format(search_for))
       return
 
     for (what, where) in results:
-      print("found {} at {} (chunk {})".format(search_for, what, hex(where)))
+      print("found {0} at {1} (chunk {2})".format(search_for, what, hex(where)))
 
 class je_dump_chunks(gdb.Command):
   '''dump chunks to the file from the section identified by beg and end addr.'''
@@ -389,15 +404,15 @@ class je_dump_chunks(gdb.Command):
         try:
           if arena != "0x0":
             ind = gdb.execute("p ((arena_t*)%s)->ind" % (arena), to_string = true).split()[2]
-            f.write("Chunk {}->{} (extent_node_t*){}: Arena #{} (arena_t*){}\n".format(hex(ptr),\
+            f.write("Chunk {0}->{1} (extent_node_t*){2}: Arena #{3} (arena_t*){4}\n".format(hex(ptr),\
               hex(ptr+csz), extent_node, ind, arena))
           else:
             size = gdb.execute("p ((extent_node_t*)%s)->en_size" % (extent_node), to_string = true).split()[2]
-            f.write("Chunk {}->{} (extent_node_t*){}: Huge allocation of size {}\n".format(hex(ptr),\
+            f.write("Chunk {0}->{1} (extent_node_t*){2}: Huge allocation of size {3}\n".format(hex(ptr),\
               hex(ptr+csz), extent_node, size))
 
         except RuntimeError:
-          print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+          print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
           sys.exit(0)
 
       ptr += csz
@@ -418,9 +433,9 @@ class je_ptr(gdb.Command):
     arg = arg.split()
     ptr = arg[0]
     try:
-      ptr = gdb.execute("p/x (uintptr_t){}".format(ptr), to_string = true).split()[2]
+      ptr = gdb.execute("p/x (uintptr_t){0}".format(ptr), to_string = true).split()[2]
     except RuntimeError:
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
     
     global heap
@@ -429,14 +444,15 @@ class je_ptr(gdb.Command):
     chunk, arena, extent_node = validate_chunk(ptr, silent=true)
 
     if extent_node == "0x0":
-      print("{} points to freed Chunk {} +{} ((extent_node_t*){})".format(ptr, chunk, hex(int(ptr,16)-int(chunk,16)), extent_node))
+      print("{0} points to freed Chunk {1} +{2} ((extent_node_t*){3})".format(ptr, chunk, hex(int(ptr,16)-int(chunk,16)), extent_node))
       return
 
     # check if the allocation doest not belong to arena
     if arena == "0x0":
-      print("{} points to allocated Chunk {} +{} ((extent_node_t*){})".format(ptr, chunk, hex(int(ptr,16)-int(chunk,16)), extent_node))
+      print("{0} points to allocated Chunk {1} +{2} ((extent_node_t*){3})".format(ptr, chunk, hex(int(ptr,16)-int(chunk,16)), extent_node))
       return
 
+    je_threads().invoke(arg = [], from_tty = False)
     # large or small allocation
     try:
       gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
@@ -447,12 +463,12 @@ class je_ptr(gdb.Command):
       rpageind = gdb.execute("p $rpageind = $pageind - ($mapbits >> $macro_CHUNK_MAP_RUNIND_SHIFT)", to_string = true).split()[2] # 13
       rpages = gdb.execute("p/x $rpages=((uintptr_t)$chunk + ($rpageind << $macro_LG_PAGE))", to_string = true).split()[2] # 12
     except RuntimeError:
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
 
     r = jemalloc.run(mapbits)
     if (not r.is_allocated()):
-      print("{} points to freed Run page {} +{} ((arena_map_bits_t){})".format(ptr, rpages, hex(int(ptr, 16)-int(rpages, 16)), mapbits))
+      print("{0} points to freed Run page {1} +{2} ((arena_map_bits_t){3})".format(ptr, rpages, hex(int(ptr, 16)-int(rpages, 16)), mapbits))
       return
 
     if (r.is_large()):
@@ -462,7 +478,7 @@ class je_ptr(gdb.Command):
         tcache_maxsz = int(gdb.execute("p 1<<je_opt_lg_tcache_max", to_string = true).split()[2])
         large_pad    = int(gdb.execute("p large_pad", to_string = true).split()[2])
       except RuntimeError:
-        print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+        print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
         sys.exit(0)
 
       if chunk_map_ss == 0:
@@ -473,7 +489,7 @@ class je_ptr(gdb.Command):
         size = (mapbits & chunk_map_sm) << -chunk_map_ss
 
       if size - large_pad > tcache_maxsz:
-        print("{} points to allocated Run page {} +{} ((arena_map_bits_t){})".format(ptr, rpages, hex(int(ptr, 16)-int(rpages, 16)), mapbits))
+        print("{0} points to allocated Run page {1} +{2} ((arena_map_bits_t){3})".format(ptr, rpages, hex(int(ptr, 16)-int(rpages, 16)), mapbits))
         return
 
       try:
@@ -481,7 +497,7 @@ class je_ptr(gdb.Command):
         qu = int(gdb.execute("p $macro_LG_QUANTUM", to_string = True).split()[2]) # 4
         nt = int(gdb.execute("p $macro_NTBINS", to_string = True).split()[2]) # 1
       except RuntimeError:
-        print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+        print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
         sys.exit(0)
 
       x = math.floor(math.log(size<<1-1,2))
@@ -492,20 +508,20 @@ class je_ptr(gdb.Command):
       mod = ((((size-1) & delta_inverse_mask) >> lg_delta)) & ((1 << sg) - 1)
       ind = nt + grp + mod
 
-      for t,v in heap.threads.items():
+      for t,v in heap.threads.iteritems():
         try:
-          avail = gdb.execute("p ((tcache_t*){})->tbins[{}]->avail".format(v["tcache"], ind), to_string = true).split()[4]
-          ncached = gdb.execute(" p ((tcache_t*){})->tbins[{}]->ncached".format(v["tcache"], ind), to_string = true).split()[2]
+          avail = gdb.execute("p ((tcache_t*){0})->tbins[{1}]->avail".format(v["tcache"], ind), to_string = true).split()[4]
+          ncached = gdb.execute(" p ((tcache_t*){0})->tbins[{1}]->ncached".format(v["tcache"], ind), to_string = true).split()[2]
           for i in reversed(range(1, int(ncached)+1)):
-            p = gdb.execute("x/gx {} - {}*sizeof(void*)".format(avail, i), to_string = true).split()[1] 
+            p = gdb.execute("x/gx {0} - {1}*sizeof(void*)".format(avail, i), to_string = true).split()[1] 
             if int(ptr, 16) == int(p, 16):
-              print("{} points to cached Run page {} +{} thread #{} tbin index {})".format(ptr, rpages, hex(int(ptr,16)-int(rpages, 16)), t, ind))
+              print("{0} points to cached Run page {1} +{2} thread #{3} tbin index {4})".format(ptr, rpages, hex(int(ptr,16)-int(rpages, 16)), t, ind))
               return
         except RuntimeError:
-          print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+          print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
           sys.exit(0)
 
-      print("{} points to allocated Run page {} +{} ((arena_map_bits_t){})".format(ptr, rpages, hex(int(ptr,16)-int(rpages,16)), mapbits))
+      print("{0} points to allocated Run page {1} +{2} ((arena_map_bits_t){3})".format(ptr, rpages, hex(int(ptr,16)-int(rpages,16)), mapbits))
       return
 
     # so it's a small allocation
@@ -524,28 +540,28 @@ class je_ptr(gdb.Command):
       g = gdb.execute("p/x $g=((bitmap_t*)$bitmap)[$goff]", to_string = true).split()[2]
       bit = gdb.execute("p $bit=(!($g&(1LU<<($regind&$macro_BITMAP_GROUP_NBITS_MASK))))", to_string = true).split()[2] # 63
     except RuntimeError:
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
 
     region = int(ptr, 16) - int(diff) + (int(regind) * int(interval))
     if (bit == 'false' or bit == '0'):
-      print("{} points to freed Region {} +{} ((arena_bin_info_t*){})".format(ptr, hex(region), hex(int(ptr,16)-region), bin_info))
+      print("{0} points to freed Region {1} +{2} ((arena_bin_info_t*){3})".format(ptr, hex(region), hex(int(ptr,16)-region), bin_info))
       sys.exit(0)
   
-    for t,v in heap.threads.items():
+    for t,v in heap.threads.iteritems():
       try:
-        avail = gdb.execute("p ((tcache_t*){})->tbins[{}]->avail".format(v["tcache"], binind), to_string = true).split()[4]
-        ncached = gdb.execute(" p ((tcache_t*){})->tbins[{}]->ncached".format(v["tcache"], binind), to_string = true).split()[2]
+        avail = gdb.execute("p ((tcache_t*){0})->tbins[{1}]->avail".format(v["tcache"], binind), to_string = true).split()[4]
+        ncached = gdb.execute(" p ((tcache_t*){0})->tbins[{1}]->ncached".format(v["tcache"], binind), to_string = true).split()[2]
         for i in reversed(range(1, int(ncached)+1)):
-          p = gdb.execute("x/gx {} - {}*sizeof(void*)".format(avail, i), to_string = true).split()[1] 
+          p = gdb.execute("x/gx {0} - {1}*sizeof(void*)".format(avail, i), to_string = true).split()[1] 
           if region == int(p, 16):
-            print("{} points to cached Region {} +{} thread #{} ((arena_bin_info_t*){})".format(ptr, hex(region), hex(int(ptr,16)-region), t, bin_info))
+            print("{0} points to cached Region {1} +{2} thread #{3} ((arena_bin_info_t*){4})".format(ptr, hex(region), hex(int(ptr,16)-region), t, bin_info))
             return
       except RuntimeError:
-        print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+        print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
         sys.exit(0)
     
-    print("{} points to allocated Region {} +{} ((arena_bin_info_t*){})".format(ptr, hex(region), hex(int(ptr,16)-region), bin_info))
+    print("{0} points to allocated Region {1} +{2} ((arena_bin_info_t*){3})".format(ptr, hex(region), hex(int(ptr,16)-region), bin_info))
     return
     
 
@@ -570,11 +586,11 @@ class je_chunk(gdb.Command):
 
     if extent_node != "0x0":
       if arena != "0x0":
-        print("Chunk {}->{} ((extent_node_t*){}): Arena ((arena_t*){})".format(chunk, hex(int(chunk, 16)+csz), extent_node, arena))
+        print("Chunk {0}->{1} ((extent_node_t*){2}): Arena ((arena_t*){3})".format(chunk, hex(int(chunk, 16)+csz), extent_node, arena))
       else:
-        print("Chunk {}->{} ((extent_node_t*){}): Contains a huge allocation".format(chunk, hex(int(chunk, 16)+csz), extent_node, arena))
+        print("Chunk {0}->{1} ((extent_node_t*){2}): Contains a huge allocation".format(chunk, hex(int(chunk, 16)+csz), extent_node, arena))
     else:
-      print("Chunk {}->{} ((extent_node_t*){}): Not allocated)".format(chunk, hex(int(chunk, 16)+csz), extent_node))
+      print("Chunk {0}->{1} ((extent_node_t*){2}): Not allocated)".format(chunk, hex(int(chunk, 16)+csz), extent_node))
 
     return
 
@@ -593,7 +609,7 @@ class je_run(gdb.Command):
     ptr = arg[0]
 
     try:
-      ptr = gdb.execute("p/x (uintptr_t){}".format(ptr), to_string = true).split()[2]
+      ptr = gdb.execute("p/x (uintptr_t){0}".format(ptr), to_string = true).split()[2]
       gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
       chunk = gdb.execute("p/x $chunk=((uintptr_t)$ptr&~je_chunksize_mask)", to_string = true).split()[2] # 0x1fffff
       pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> $macro_LG_PAGE", to_string = true).split()[2] # 12
@@ -609,7 +625,7 @@ class je_run(gdb.Command):
       tcache_maxsz = int(gdb.execute("p 1<<je_opt_lg_tcache_max", to_string = true).split()[2])
       large_pad    = int(gdb.execute("p large_pad", to_string = true).split()[2])
     except RuntimeError:
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
 
     r = jemalloc.run(mapbits)
@@ -621,7 +637,7 @@ class je_run(gdb.Command):
     else:
       size = (mapbits & chunk_map_sm) << -chunk_map_ss
 
-    print("Run {}->{} ((arena_run_t*){}): allocated {}, large {}, decommitted {}, unzeroed {}, dirty {}".format(
+    print("Run {0}->{1} ((arena_run_t*){2}): allocated {3}, large {4}, decommitted {5}, unzeroed {6}, dirty {7}".format(
       rpages, hex(int(rpages, 16)+size), run, r.is_allocated(), r.is_large(), r.is_decommitted(), r.is_unzeroed(), r.is_dirty()))
 
     return
@@ -640,14 +656,14 @@ class je_region(gdb.Command):
     ptr = arg[0]
 
     try:
-      ptr = gdb.execute("p/x (uintptr_t){}".format(ptr), to_string = true).split()[2]
+      ptr = gdb.execute("p/x (uintptr_t){0}".format(ptr), to_string = true).split()[2]
       gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
       chunk = gdb.execute("p/x $chunk=((uintptr_t)$ptr&~je_chunksize_mask)", to_string = true).split()[2]
       pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> $macro_LG_PAGE", to_string = true).split()[2]
       mapbits = int(gdb.execute("p/x $mapbits=((arena_chunk_t*)$chunk)->map_bits[$pageind-je_map_bias].bits", \
       to_string = true).split()[2], 16)
     except RuntimeError:
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
     
     r = jemalloc.run(mapbits)
@@ -674,11 +690,11 @@ class je_region(gdb.Command):
       g = gdb.execute("p/x $g=((bitmap_t*)$bitmap)[$goff]", to_string = true).split()[2]
       bit = gdb.execute("p $bit=(!($g&(1LU<<($regind&$macro_BITMAP_GROUP_NBITS_MASK))))", to_string = true).split()[2]
     except RuntimeError:
-      print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+      print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
       sys.exit(0)
 
     region = int(ptr, 16) - int(diff) + (int(regind) * int(interval))
-    print("Region {}->{} ((arena_bin_info_t*){}): allocated {}".format(hex(region), hex(region+int(size, 16)), bin_info, bool(bit)))
+    print("Region {0}->{1} ((arena_bin_info_t*){2}): allocated {3}".format(hex(region), hex(region+int(size, 16)), bin_info, bool(bit)))
 
     return
 
