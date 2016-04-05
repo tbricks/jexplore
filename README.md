@@ -13,7 +13,8 @@ jexplore - is a bundle of python scripts which help to unveil the state of under
 * Change jemalloc Makefile variable
 ```C_SRCS += $(srcroot)src/macrolist.c```
 * Rebuild jemalloc
-* Add ```source /PATH/TO/jexplore/jexplore.py``` to your .gdbinit file. Or type it directly in a new gdb session.
+* Add ```source /PATH/TO/jexplore/jexplore.py``` to your .gdbinit file. Or type it directly in a new gdb session
+* By default scripts work with python3, for python2.6 support switch to python26 upstream branch
 
 # Documentation
 

@@ -144,6 +144,20 @@ class je_threads(gdb.Command):
       print("Thread caches will not be supported!")
 
     for t,p in heap.threads.items():
+      tsd = gdb.execute("p je_tsd_tls", to_string = true)
+      m = re.match(".*tcache = (0x[0-9a-fA-F]+).*thread_allocated = ([0-9]+).*thread_deallocated = ([0-9]+).*", tsd)
+      if m is None:
+        print("The core file seems corrupted, TLS data is not available for thread {0}".format(pid))
+        return
+
+      heap.threads[t]["tcache"] = m.group(1)
+      heap.threads[t]["talloc"] = m.group(2)
+      heap.threads[t]["tfree"] = m.group(3)
+
+    if not from_tty:
+      return
+
+    for t,p in heap.threads.items():
       print("Thread #{}".format(t))
       for p,v in p.items():
         print("\t{}: {}".format(p, v))
@@ -437,6 +451,7 @@ class je_ptr(gdb.Command):
       print("{} points to allocated Chunk {} +{} ((extent_node_t*){})".format(ptr, chunk, hex(int(ptr,16)-int(chunk,16)), extent_node))
       return
 
+    je_threads().invoke(arg = [], from_tty = False)
     # large or small allocation
     try:
       gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
