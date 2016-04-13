@@ -217,6 +217,7 @@ class je_init(gdb.Command):
       gdb.execute("p $macro_NTBINS = macro_NTBINS", to_string = true)
       gdb.execute("p $macro_LG_SIZE_CLASS_GROUP = macro_LG_SIZE_CLASS_GROUP", to_string = true)
       gdb.execute("p $macro_LG_QUANTUM = macro_LG_QUANTUM", to_string = true)
+      je_threads()
       print("Jemalloc was built with all necessary macroses.")
     else:
       import platform
@@ -239,6 +240,7 @@ class je_init(gdb.Command):
         gdb.execute("p $macro_NTBINS = 1", to_string = true)
         gdb.execute("p $macro_LG_SIZE_CLASS_GROUP = 2", to_string = true)
         gdb.execute("p $macro_LG_QUANTUM = 4", to_string = true)
+        je_threads()
         print("Jemalloc macroses are hardcoded for x86_64. Type show convenience to view them.")
 
 class je_scan_sections(gdb.Command):
@@ -512,8 +514,8 @@ class je_ptr(gdb.Command):
         try:
           avail = gdb.execute("p ((tcache_t*){0})->tbins[{1}]->avail".format(v["tcache"], ind), to_string = true).split()[4]
           ncached = gdb.execute(" p ((tcache_t*){0})->tbins[{1}]->ncached".format(v["tcache"], ind), to_string = true).split()[2]
-          for i in reversed(range(1, int(ncached)+1)):
-            p = gdb.execute("x/gx {0} - {1}*sizeof(void*)".format(avail, i), to_string = true).split()[1] 
+          for i in reversed(range(1, int(ncached))):
+            p = gdb.execute("x/gx {0} + {1}*sizeof(void*)".format(avail, i), to_string = true).split()[1] 
             if int(ptr, 16) == int(p, 16):
               print("{0} points to cached Run page {1} +{2} thread #{3} tbin index {4})".format(ptr, rpages, hex(int(ptr,16)-int(rpages, 16)), t, ind))
               return
@@ -552,8 +554,8 @@ class je_ptr(gdb.Command):
       try:
         avail = gdb.execute("p ((tcache_t*){0})->tbins[{1}]->avail".format(v["tcache"], binind), to_string = true).split()[4]
         ncached = gdb.execute(" p ((tcache_t*){0})->tbins[{1}]->ncached".format(v["tcache"], binind), to_string = true).split()[2]
-        for i in reversed(range(1, int(ncached)+1)):
-          p = gdb.execute("x/gx {0} - {1}*sizeof(void*)".format(avail, i), to_string = true).split()[1] 
+        for i in reversed(range(1, int(ncached))):
+          p = gdb.execute("x/gx {0} + {1}*sizeof(void*)".format(avail, i), to_string = true).split()[1] 
           if region == int(p, 16):
             print("{0} points to cached Region {1} +{2} thread #{3} ((arena_bin_info_t*){4})".format(ptr, hex(region), hex(int(ptr,16)-region), t, bin_info))
             return
