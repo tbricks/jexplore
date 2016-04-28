@@ -336,7 +336,7 @@ class je_search(gdb.Command):
 
     global heap
     if not heap.sections:
-      print("Rin je_scan_sections first to find some heap sections.")
+      print("Run je_scan_sections first to find some heap sections.")
       return
 
     print("Searching all sections discovered by je_scan_sections for {}".format(search_for))
@@ -347,7 +347,7 @@ class je_search(gdb.Command):
         while (ptr < int(end, 16)):
           try:
             out_str = gdb.execute("find {} {}, {}, {}".format(size, hex(ptr), \
-              hex(ptr + csz), search_for), to_string = true)
+              hex(ptr + csz-1), search_for), to_string = true)
           except:
             continue
 
