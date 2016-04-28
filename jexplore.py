@@ -548,7 +548,7 @@ class je_ptr(gdb.Command):
     region = int(ptr, 16) - int(diff) + (int(regind) * int(interval))
     if (bit == 'false' or bit == '0'):
       print("{0} points to freed Region {1} +{2} ((arena_bin_info_t*){3})".format(ptr, hex(region), hex(int(ptr,16)-region), bin_info))
-      sys.exit(0)
+      return
   
     for t,v in heap.threads.iteritems():
       try:
@@ -696,7 +696,7 @@ class je_region(gdb.Command):
       sys.exit(0)
 
     region = int(ptr, 16) - int(diff) + (int(regind) * int(interval))
-    print("Region {0}->{1} ((arena_bin_info_t*){2}): allocated {3}".format(hex(region), hex(region+int(size, 16)), bin_info, bool(bit)))
+    print("Region {0}->{1} ((arena_bin_info_t*){2}): allocated {3}".format(hex(region), hex(region+int(size, 16)), bin_info, bit))
 
     return
 
