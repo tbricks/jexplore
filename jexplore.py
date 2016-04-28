@@ -421,7 +421,7 @@ class je_dump_chunks(gdb.Command):
     f.close()
 
 class je_ptr(gdb.Command):
-  '''check internal jemalloc structures associated with this pointer''' 
+  '''check internal jemalloc structures associated with this pointer, return the status (active/cached/freed)''' 
 
   def __init__(self):
     gdb.Command.__init__(self, "je_ptr", gdb.COMMAND_OBSCURE)
@@ -491,7 +491,7 @@ class je_ptr(gdb.Command):
         size = (mapbits & chunk_map_sm) << -chunk_map_ss
 
       if size - large_pad > tcache_maxsz:
-        print("{} points to allocated Run page {} +{} ((arena_map_bits_t){})".format(ptr, rpages, hex(int(ptr, 16)-int(rpages, 16)), mapbits))
+        print("{} points to allocated Run page {} +{} ((arena_map_bits_t){}) of size {}".format(ptr, rpages, hex(int(ptr, 16)-int(rpages, 16)), mapbits, size))
         return
 
       try:
@@ -523,7 +523,7 @@ class je_ptr(gdb.Command):
           print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
           sys.exit(0)
 
-      print("{} points to allocated Run page {} +{} ((arena_map_bits_t){})".format(ptr, rpages, hex(int(ptr,16)-int(rpages,16)), mapbits))
+      print("{} points to allocated Run page {} +{} ((arena_map_bits_t){}) of size {}".format(ptr, rpages, hex(int(ptr,16)-int(rpages,16)), mapbits, size))
       return
 
     # so it's a small allocation
@@ -563,9 +563,123 @@ class je_ptr(gdb.Command):
         print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
         sys.exit(0)
     
-    print("{} points to allocated Region {} +{} ((arena_bin_info_t*){})".format(ptr, hex(region), hex(int(ptr,16)-region), bin_info))
+    print("{} points to allocated Region {} +{} ((arena_bin_info_t*){}) of size {}".format(ptr, hex(region), hex(int(ptr,16)-region), bin_info, interval))
     return
     
+class je_batch(gdb.Command):
+  '''given a file with pointers (one at a row) append a second row with pointer status (active/freed) print out the percent of active''' 
+
+  def __init__(self):
+    gdb.Command.__init__(self, "je_batch", gdb.COMMAND_OBSCURE)
+
+  def invoke(self, arg, from_tty):
+    if len(arg) < 1:
+      print("submit a filename")
+      return
+
+    arg = arg.split()
+    filename = arg[0]
+
+    if not os.path.isfile(filename):
+      print("File does not exist")
+      returno
+
+    allcount = 0
+    allocatedcount = 0
+    allocatedsize = 0
+
+    import fileinput
+    
+    for line in fileinput.input(filename, inplace=1):
+
+      try:
+        ptr = gdb.execute("p/x (uintptr_t){}".format(line.rstrip("\n")), to_string = true).split()[2]
+      except RuntimeError:
+        print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+        sys.exit(0)
+      
+      allcount += 1
+      global heap
+      csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
+
+      chunk, arena, extent_node = validate_chunk(ptr, silent=true)
+
+      if extent_node == "0x0":
+        print("{} freed chunk".format(ptr))
+        continue
+
+      # check if the allocation doest not belong to arena
+      if arena == "0x0":
+        print("{} allocated chunk".format(ptr))
+        allocatedcount += 1
+        continue
+
+      try:
+        gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
+        chunk = gdb.execute("p/x $chunk=((uintptr_t)$ptr&~je_chunksize_mask)", to_string = true).split()[2] # 0x1fffff
+        pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> $macro_LG_PAGE", to_string = true).split()[2] # 12
+        mapbits = int(gdb.execute("p/x $mapbits=((arena_chunk_t*)$chunk)->map_bits[$pageind-je_map_bias].bits", \
+        to_string = true).split()[2], 16) # 13
+        rpageind = gdb.execute("p $rpageind = $pageind - ($mapbits >> $macro_CHUNK_MAP_RUNIND_SHIFT)", to_string = true).split()[2] # 13
+        rpages = gdb.execute("p/x $rpages=((uintptr_t)$chunk + ($rpageind << $macro_LG_PAGE))", to_string = true).split()[2] # 12
+      except RuntimeError:
+        print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+        sys.exit(0)
+
+      r = jemalloc.run(mapbits)
+      if (not r.is_allocated()):
+        print("{} freed run".format(ptr))
+        continue
+      if (r.is_large()):
+        try:
+          chunk_map_ss = int(gdb.execute("p $macro_CHUNK_MAP_SIZE_SHIFT", to_string = true).split()[2]) # 1
+          chunk_map_sm = int(gdb.execute("p $macro_CHUNK_MAP_SIZE_MASK", to_string = true).split()[2]) # 0xffffffffffffe000
+        except RuntimeError:
+          print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+          sys.exit(0)
+
+        if chunk_map_ss == 0:
+          size = (mapbits & chunk_map_sm)
+        elif chunk_map_ss > 0:
+          size = (mapbits & chunk_map_sm) >> chunk_map_ss
+        else:
+          size = (mapbits & chunk_map_sm) << -chunk_map_ss
+
+        print("{} allocated run".format(ptr))
+        allocatedcount += 1
+        allocatedsize += (size)
+        continue
+
+      # so it's a small allocation
+      try:
+        miscelm = gdb.execute("p/x $miscelm=((arena_chunk_map_misc_t *)((uintptr_t)$chunk+(uintptr_t)je_map_misc_offset)+$rpageind-je_map_bias)", \
+        to_string = true).split()[2] # 4096 13
+        run = gdb.execute("p/x $run=&((arena_chunk_map_misc_t*)$miscelm)->run", to_string = true).split()[2]
+        bitmap = gdb.execute("p/x $bitmap=((arena_run_t*)$run)->bitmap", to_string = true).split()[2]
+        binind = gdb.execute("p $binind=($mapbits&$macro_CHUNK_MAP_BININD_MASK)>>$macro_CHUNK_MAP_BININD_SHIFT", to_string = true).split()[2] # 0x1fe0 5
+        bin_info = gdb.execute("p $bin_info = &je_arena_bin_info[$binind]", to_string = true).split()[4]
+        diff = gdb.execute("p $diff=(unsigned)((uintptr_t)$ptr-(uintptr_t)$rpages-((arena_bin_info_t*)$bin_info)->reg0_offset)", \
+        to_string = true).split()[2]       
+        interval = gdb.execute("p $interval = ((arena_bin_info_t*)$bin_info)->reg_interval", to_string = true).split()[2]
+        regind = gdb.execute("p $regind = $diff/$interval", to_string = true).split()[2]
+        goff = gdb.execute("p $goff=$regind>>$macro_LG_BITMAP_GROUP_NBITS", to_string = true).split()[2] # 6
+        g = gdb.execute("p/x $g=((bitmap_t*)$bitmap)[$goff]", to_string = true).split()[2]
+        bit = gdb.execute("p $bit=(!($g&(1LU<<($regind&$macro_BITMAP_GROUP_NBITS_MASK))))", to_string = true).split()[2] # 63
+      except RuntimeError:
+        print("Error type: {}, Description: {}".format(sys.exc_info()[0], sys.exc_info()[1]))
+        sys.exit(0)
+
+      region = int(ptr, 16) - int(diff) + (int(regind) * int(interval))
+      if (bit == 'false' or bit == '0'):
+        print("{} freed region".format(ptr))
+        continue
+      else:
+        print("{} allocated region".format(ptr))
+        allocatedcount += 1
+        allocatedsize += int(interval)
+        continue
+
+    print("{} checked, {} allocated, {} allocated size (chunks omitted)".format(allcount, allocatedcount, allocatedsize))
 
 class je_chunk(gdb.Command):
   '''check the chunk associated with this pointer (huge)'''
@@ -710,3 +824,4 @@ je_region()
 je_scan_sections()
 je_dump_chunks()
 je_search()
+je_batch()
