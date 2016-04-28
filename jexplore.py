@@ -298,7 +298,7 @@ class je_scan_sections(gdb.Command):
       print("{} {}".format(b,e))
 
 class je_search(gdb.Command):
-  '''search string in detected heap sections (flags like gdb find)'''
+  '''search string in heap sections detected by je_scan_sections (flags like gdb find)'''
 
   def __init__(self):
     gdb.Command.__init__(self, 'je_search', gdb.COMMAND_OBSCURE)
@@ -310,10 +310,28 @@ class je_search(gdb.Command):
       return
     else:
       arg = arg.split()
-      if len(arg) == 3 and arg[0][0] == "/" and arg[1].isdigit():
-        search_for = arg[2]
+      if len(arg) == 4 and arg[0][0] == "/" and arg[1].isdigit():
         size = arg[0]
         count = arg[1]
+        search_for = arg[2]
+        outfile = arg[3]
+        print("Result of the search will be printed to {}".format(outfile))
+      elif len(arg) == 3 and arg[0][0] == "/" and arg[1].isdigit():
+        size = arg[0]
+        count = arg[1]
+        search_for = arg[2]
+      elif len(arg) == 3 and arg[0].isdigit():
+        search_for = arg[1]
+        count = arg[0]
+        size = ""
+        outfile = [2]
+        print("Result of the search will be printed to {}".format(outfile))
+      elif len(arg) == 3 and arg[0][0] == "/"():
+        search_for = arg[1]
+        size = arg[0]
+        count = float("inf")
+        outfile = [2]
+        print("Result of the search will be printed to {}".format(outfile))
       elif len(arg) == 2 and arg[0].isdigit():
         search_for = arg[1]
         count = arg[0]
@@ -322,6 +340,12 @@ class je_search(gdb.Command):
         search_for = arg[1]
         size = arg[0]
         count = float("inf")
+      elif len(arg) == 2:
+        search_for = arg[0]
+        outfile = arg[1]
+        size = ""
+        count = float("inf")
+        print("Result of the search will be printed to {}".format(outfile))
       elif len(arg) == 1:
         search_for = arg[0]
         size = ""
@@ -338,8 +362,6 @@ class je_search(gdb.Command):
     if not heap.sections:
       print("Run je_scan_sections first to find some heap sections.")
       return
-
-    print("Searching all sections discovered by je_scan_sections for {}".format(search_for))
 
     try:
       for beg,end in heap.sections.items():
@@ -369,8 +391,20 @@ class je_search(gdb.Command):
       print("value {} not found".format(search_for))
       return
 
-    for (what, where) in results:
-      print("found {} at {} (chunk {})".format(search_for, what, hex(where)))
+    count = 0
+
+    if 'outfile' in locals():
+      fout = open(outfile, "w")
+      for (what, where) in results:
+        fout.write("{}\n".format(what))
+        count += 1
+      fout.close()
+    else:
+      for (what, where) in results:
+        count += 1
+        print("{} (chunk {})".format(what, hex(where)))
+
+    print("{} occurences of {} found".format(count, search_for))
 
 class je_dump_chunks(gdb.Command):
   '''dump chunks to the file from the section identified by beg and end addr.'''
@@ -567,30 +601,32 @@ class je_ptr(gdb.Command):
     return
     
 class je_batch(gdb.Command):
-  '''given a file with pointers (one at a row) append a second row with pointer status (active/freed) print out the percent of active''' 
+  '''given a file with pointers (one at a row), print out another file with a second row with pointer status (active/freed), give totals of size and allocated''' 
 
   def __init__(self):
     gdb.Command.__init__(self, "je_batch", gdb.COMMAND_OBSCURE)
 
   def invoke(self, arg, from_tty):
-    if len(arg) < 1:
-      print("submit a filename")
+    if len(arg) < 2:
+      print("Submit infile of pointers and outfile")
       return
 
     arg = arg.split()
-    filename = arg[0]
+    infile = arg[0]
+    outfile = arg[1]
 
-    if not os.path.isfile(filename):
+    if not os.path.isfile(infile):
       print("File does not exist")
-      returno
+      return
 
     allcount = 0
     allocatedcount = 0
     allocatedsize = 0
 
-    import fileinput
-    
-    for line in fileinput.input(filename, inplace=1):
+    fin = open(infile, "r")
+    fout = open(outfile, "w")
+     
+    for line in fin:
 
       try:
         ptr = gdb.execute("p/x (uintptr_t){}".format(line.rstrip("\n")), to_string = true).split()[2]
@@ -605,12 +641,12 @@ class je_batch(gdb.Command):
       chunk, arena, extent_node = validate_chunk(ptr, silent=true)
 
       if extent_node == "0x0":
-        print("{} freed chunk".format(ptr))
+        fout.write("{} freed chunk\n".format(ptr))
         continue
 
       # check if the allocation doest not belong to arena
       if arena == "0x0":
-        print("{} allocated chunk".format(ptr))
+        fout.write("{} allocated chunk\n".format(ptr))
         allocatedcount += 1
         continue
 
@@ -628,7 +664,7 @@ class je_batch(gdb.Command):
 
       r = jemalloc.run(mapbits)
       if (not r.is_allocated()):
-        print("{} freed run".format(ptr))
+        fout.write("{} freed run\n".format(ptr))
         continue
       if (r.is_large()):
         try:
@@ -645,7 +681,7 @@ class je_batch(gdb.Command):
         else:
           size = (mapbits & chunk_map_sm) << -chunk_map_ss
 
-        print("{} allocated run".format(ptr))
+        fout.write("{} allocated run\n".format(ptr))
         allocatedcount += 1
         allocatedsize += (size)
         continue
@@ -671,13 +707,16 @@ class je_batch(gdb.Command):
 
       region = int(ptr, 16) - int(diff) + (int(regind) * int(interval))
       if (bit == 'false' or bit == '0'):
-        print("{} freed region".format(ptr))
+        fout.write("{} freed region\n".format(ptr))
         continue
       else:
-        print("{} allocated region".format(ptr))
+        fout.write("{} allocated region\n".format(ptr))
         allocatedcount += 1
         allocatedsize += int(interval)
         continue
+
+    fout.close()
+    fin.close()
 
     print("{} checked, {} allocated, {} allocated size (chunks omitted)".format(allcount, allocatedcount, allocatedsize))
 
