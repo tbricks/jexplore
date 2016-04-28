@@ -453,6 +453,7 @@ class je_ptr(gdb.Command):
       print("{} points to allocated Chunk {} +{} ((extent_node_t*){})".format(ptr, chunk, hex(int(ptr,16)-int(chunk,16)), extent_node))
       return
 
+    # 
     je_threads().invoke(arg = [], from_tty = False)
     # large or small allocation
     try:
@@ -547,7 +548,7 @@ class je_ptr(gdb.Command):
     region = int(ptr, 16) - int(diff) + (int(regind) * int(interval))
     if (bit == 'false' or bit == '0'):
       print("{} points to freed Region {} +{} ((arena_bin_info_t*){})".format(ptr, hex(region), hex(int(ptr,16)-region), bin_info))
-      sys.exit(0)
+      return
 
     for t,v in heap.threads.items():
       try:
@@ -695,7 +696,7 @@ class je_region(gdb.Command):
       sys.exit(0)
 
     region = int(ptr, 16) - int(diff) + (int(regind) * int(interval))
-    print("Region {}->{} ((arena_bin_info_t*){}): allocated {}".format(hex(region), hex(region+int(size, 16)), bin_info, bool(bit)))
+    print("Region {}->{} ((arena_bin_info_t*){}): allocated {}".format(hex(region), hex(region+int(size, 16)), bin_info, bit))
 
     return
 
