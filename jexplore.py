@@ -299,7 +299,7 @@ class je_scan_sections(gdb.Command):
       print("{0} {1}".format(b,e))
 
 class je_search(gdb.Command):
-  '''search string in detected heap sections (flags like gdb find)'''
+  '''search string in heap sections detected by je_scan_sections (flags like gdb find)'''
 
   def __init__(self):
     gdb.Command.__init__(self, 'je_search', gdb.COMMAND_OBSCURE)
@@ -311,10 +311,28 @@ class je_search(gdb.Command):
       return
     else:
       arg = arg.split()
-      if len(arg) == 3 and arg[0][0] == "/" and arg[1].isdigit():
-        search_for = arg[2]
+      if len(arg) == 4 and arg[0][0] == "/" and arg[1].isdigit():
         size = arg[0]
         count = arg[1]
+        search_for = arg[2]
+        outfile = arg[3]
+        print("Result of the search will be printed to {}".format(outfile))
+      elif len(arg) == 3 and arg[0][0] == "/" and arg[1].isdigit():
+        size = arg[0]
+        count = arg[1]
+        search_for = arg[2]
+      elif len(arg) == 3 and arg[0].isdigit():
+        search_for = arg[1]
+        count = arg[0]
+        size = ""
+        outfile = [2]
+        print("Result of the search will be printed to {}".format(outfile))
+      elif len(arg) == 3 and arg[0][0] == "/"():
+        search_for = arg[1]
+        size = arg[0]
+        count = float("inf")
+        outfile = [2]
+        print("Result of the search will be printed to {}".format(outfile))
       elif len(arg) == 2 and arg[0].isdigit():
         search_for = arg[1]
         count = arg[0]
@@ -323,6 +341,12 @@ class je_search(gdb.Command):
         search_for = arg[1]
         size = arg[0]
         count = float("inf")
+      elif len(arg) == 2:
+        search_for = arg[0]
+        outfile = arg[1]
+        size = ""
+        count = float("inf")
+        print("Result of the search will be printed to {}".format(outfile))
       elif len(arg) == 1:
         search_for = arg[0]
         size = ""
@@ -337,7 +361,7 @@ class je_search(gdb.Command):
 
     global heap
     if not heap.sections:
-      print("Rin je_scan_sections first to find some heap sections.")
+      print("Run je_scan_sections first to find some heap sections.")
       return
 
     print("Searching all sections discovered by je_scan_sections for {0}".format(search_for))
@@ -348,7 +372,7 @@ class je_search(gdb.Command):
         while (ptr < int(end, 16)):
           try:
             out_str = gdb.execute("find {0} {1}, {2}, {3}".format(size, hex(ptr), \
-              hex(ptr + csz), search_for), to_string = true)
+              hex(ptr + csz - 1), search_for), to_string = true)
           except:
             continue
 
@@ -370,8 +394,20 @@ class je_search(gdb.Command):
       print("value {0} not found".format(search_for))
       return
 
-    for (what, where) in results:
-      print("found {0} at {1} (chunk {2})".format(search_for, what, hex(where)))
+    count = 0
+
+    if 'outfile' in locals():
+      fout = open(outfile, "w")
+      for (what, where) in results:
+        fout.write("{0}\n".format(what))
+        count += 1
+      fout.close()
+    else:
+      for (what, where) in results:
+        count += 1
+        print("{0} (chunk {1})".format(what, hex(where)))
+
+    print("{0} occurences of {1} found".format(count, search_for))
 
 class je_dump_chunks(gdb.Command):
   '''dump chunks to the file from the section identified by beg and end addr.'''
@@ -422,7 +458,7 @@ class je_dump_chunks(gdb.Command):
     f.close()
 
 class je_ptr(gdb.Command):
-  '''check internal jemalloc structures associated with this pointer''' 
+  '''check internal jemalloc structures associated with this pointer, return the status (allocated/cached/freed)''' 
 
   def __init__(self):
     gdb.Command.__init__(self, "je_ptr", gdb.COMMAND_OBSCURE)
@@ -491,7 +527,7 @@ class je_ptr(gdb.Command):
         size = (mapbits & chunk_map_sm) << -chunk_map_ss
 
       if size - large_pad > tcache_maxsz:
-        print("{0} points to allocated Run page {1} +{2} ((arena_map_bits_t){3})".format(ptr, rpages, hex(int(ptr, 16)-int(rpages, 16)), mapbits))
+        print("{0} points to allocated Run page {1} +{2} ((arena_map_bits_t){3}) of size {4}".format(ptr, rpages, hex(int(ptr, 16)-int(rpages, 16)), mapbits, size))
         return
 
       try:
@@ -523,7 +559,7 @@ class je_ptr(gdb.Command):
           print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
           sys.exit(0)
 
-      print("{0} points to allocated Run page {1} +{2} ((arena_map_bits_t){3})".format(ptr, rpages, hex(int(ptr,16)-int(rpages,16)), mapbits))
+      print("{0} points to allocated Run page {1} +{2} ((arena_map_bits_t){3}) of size {4}".format(ptr, rpages, hex(int(ptr,16)-int(rpages,16)), mapbits, size))
       return
 
     # so it's a small allocation
@@ -563,9 +599,128 @@ class je_ptr(gdb.Command):
         print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
         sys.exit(0)
     
-    print("{0} points to allocated Region {1} +{2} ((arena_bin_info_t*){3})".format(ptr, hex(region), hex(int(ptr,16)-region), bin_info))
+    print("{0} points to allocated Region {1} +{2} ((arena_bin_info_t*){3}) of size {4}".format(ptr, hex(region), hex(int(ptr,16)-region), bin_info, interval))
     return
     
+class je_batch(gdb.Command):
+  '''given a file with pointers (one at a row), print out another file with a second row with pointer status (active/freed), give totals of size and allocated'''
+
+  def __init__(self):
+    gdb.Command.__init__(self, "je_batch", gdb.COMMAND_OBSCURE)
+
+  def invoke(self, arg, from_tty):
+    if len(arg) < 2:
+      print("Submit infile of pointers and outfile")
+      return
+
+    arg = arg.split()
+    infile = arg[0]
+    outfile = arg[1]
+
+    if not os.path.isfile(infile):
+      print("File does not exist")
+      return
+
+    allcount = 0
+    allocatedcount = 0
+    allocatedsize = 0
+
+    fin = open(infile, "r")
+    fout = open(outfile, "w")
+
+    for line in fin:
+
+      try:
+        ptr = gdb.execute("p/x (uintptr_t){0}".format(line.rstrip("\n")), to_string = true).split()[2]
+      except RuntimeError:
+        print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
+        sys.exit(0)
+
+      allcount += 1
+      global heap
+      csz = int(gdb.execute("p je_chunksize", to_string = true).split()[2])
+
+      chunk, arena, extent_node = validate_chunk(ptr, silent=true)
+
+      if extent_node == "0x0":
+        fout.write("{0} freed chunk\n".format(ptr))
+        continue
+
+      # check if the allocation doest not belong to arena
+      if arena == "0x0":
+        fout.write("{0} allocated chunk\n".format(ptr))
+        allocatedcount += 1
+        continue
+
+      try:
+        gdb.execute("p/x $ptr=%s" % (ptr), to_string = true)
+        chunk = gdb.execute("p/x $chunk=((uintptr_t)$ptr&~je_chunksize_mask)", to_string = true).split()[2] # 0x1fffff
+        pageind = gdb.execute("p $pageind=((uintptr_t)$ptr - (uintptr_t)$chunk) >> $macro_LG_PAGE", to_string = true).split()[2] # 12
+        mapbits = int(gdb.execute("p/x $mapbits=((arena_chunk_t*)$chunk)->map_bits[$pageind-je_map_bias].bits", \
+        to_string = true).split()[2], 16) # 13
+        rpageind = gdb.execute("p $rpageind = $pageind - ($mapbits >> $macro_CHUNK_MAP_RUNIND_SHIFT)", to_string = true).split()[2] # 13
+        rpages = gdb.execute("p/x $rpages=((uintptr_t)$chunk + ($rpageind << $macro_LG_PAGE))", to_string = true).split()[2] # 12
+      except RuntimeError:
+        print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
+        sys.exit(0)
+
+      r = jemalloc.run(mapbits)
+      if (not r.is_allocated()):
+        fout.write("{0} freed run\n".format(ptr))
+        continue
+      if (r.is_large()):
+        try:
+          chunk_map_ss = int(gdb.execute("p $macro_CHUNK_MAP_SIZE_SHIFT", to_string = true).split()[2]) # 1
+          chunk_map_sm = int(gdb.execute("p $macro_CHUNK_MAP_SIZE_MASK", to_string = true).split()[2]) # 0xffffffffffffe000
+        except RuntimeError:
+          print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
+          sys.exit(0)
+
+        if chunk_map_ss == 0:
+          size = (mapbits & chunk_map_sm)
+        elif chunk_map_ss > 0:
+          size = (mapbits & chunk_map_sm) >> chunk_map_ss
+        else:
+          size = (mapbits & chunk_map_sm) << -chunk_map_ss
+
+        fout.write("{0} allocated run\n".format(ptr))
+        allocatedcount += 1
+        allocatedsize += (size)
+        continue
+
+      # so it's a small allocation
+      try:
+        miscelm = gdb.execute("p/x $miscelm=((arena_chunk_map_misc_t *)((uintptr_t)$chunk+(uintptr_t)je_map_misc_offset)+$rpageind-je_map_bias)", \
+        to_string = true).split()[2] # 4096 13
+        run = gdb.execute("p/x $run=&((arena_chunk_map_misc_t*)$miscelm)->run", to_string = true).split()[2]
+        bitmap = gdb.execute("p/x $bitmap=((arena_run_t*)$run)->bitmap", to_string = true).split()[2]
+        binind = gdb.execute("p $binind=($mapbits&$macro_CHUNK_MAP_BININD_MASK)>>$macro_CHUNK_MAP_BININD_SHIFT", to_string = true).split()[2] # 0x1fe0 5
+        bin_info = gdb.execute("p $bin_info = &je_arena_bin_info[$binind]", to_string = true).split()[4]
+        diff = gdb.execute("p $diff=(unsigned)((uintptr_t)$ptr-(uintptr_t)$rpages-((arena_bin_info_t*)$bin_info)->reg0_offset)", \
+        to_string = true).split()[2]
+        interval = gdb.execute("p $interval = ((arena_bin_info_t*)$bin_info)->reg_interval", to_string = true).split()[2]
+        regind = gdb.execute("p $regind = $diff/$interval", to_string = true).split()[2]
+        goff = gdb.execute("p $goff=$regind>>$macro_LG_BITMAP_GROUP_NBITS", to_string = true).split()[2] # 6
+        g = gdb.execute("p/x $g=((bitmap_t*)$bitmap)[$goff]", to_string = true).split()[2]
+        bit = gdb.execute("p $bit=(!($g&(1LU<<($regind&$macro_BITMAP_GROUP_NBITS_MASK))))", to_string = true).split()[2] # 63
+      except RuntimeError:
+        print("Error type: {0}, Description: {1}".format(sys.exc_info()[0], sys.exc_info()[1]))
+        sys.exit(0)
+
+      region = int(ptr, 16) - int(diff) + (int(regind) * int(interval))
+      if (bit == 'false' or bit == '0'):
+        fout.write("{0} freed region\n".format(ptr))
+        continue
+      else:
+        fout.write("{0} allocated region\n".format(ptr))
+        allocatedcount += 1
+        allocatedsize += int(interval)
+        continue
+
+    fout.close()
+    fin.close()
+
+    print("{0} checked, {1} allocated, {2} allocated size (chunks omitted)".format(allcount, allocatedcount, allocatedsize))
 
 class je_chunk(gdb.Command):
   '''check the chunk associated with this pointer (huge)'''
@@ -710,3 +865,4 @@ je_region()
 je_scan_sections()
 je_dump_chunks()
 je_search()
+je_batch()
