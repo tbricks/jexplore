@@ -39,7 +39,7 @@ def validate_chunk(ptr, silent = true):
     lg_floor = math.floor(lg)
     gdb.execute("p/x $ptr=%s" % (chunk), to_string = true)
     gdb.execute("p $lg_floor=%d" %(lg_floor), to_string = true)
-    chunks_rtree = gdb.execute("p/x je_chunks_rtree", to_string = true).split()[2]
+    chunks_rtree = gdb.execute("p/x &je_chunks_rtree", to_string = true).split()[2]
     start_level = gdb.execute("p $start_level = je_chunks_rtree->start_level[$lg_floor>>$macro_LG_RTREE_BITS_PER_LEVEL]", to_string = true).split()[2] # 4
     height = gdb.execute("p $height = je_chunks_rtree->height", to_string = true).split()[2]
     next_node = gdb.execute("p $next_node = je_chunks_rtree.levels[$start_level].subtree", to_string = true).split()[4]
